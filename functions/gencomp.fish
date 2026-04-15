@@ -20,6 +20,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
         echo "                         {} is replaced with 'command [subcommand]'"
         echo "  -w, --wraps <cmd>      copy completions from another command"
         echo "  -F, --fish-version <N> target fish major version (default: auto)"
+        echo "  -v, --verbose          show progress on stderr"
         echo
         echo "Management:"
         echo "  -l, --list             list generated completions"
@@ -70,7 +71,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     end
 
     # parse the usage message
-    function __gencomp_parse -a cmd sub use_command is_subcmd_parse_mode
+    function __gencomp_parse -a cmd sub use_command is_subcmd_parse_mode verbose
         set -l section default
 
         eval (string replace -a -- "{}" "$cmd $sub" "$use_command") 2>&1 | tr \t ' ' | string replace -ra '\e\[[0-9;]*m' '' | while read -l line
@@ -90,9 +91,10 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 if test (count $words) = 3
                     __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]"
                     if test "$is_subcmd_parse_mode" = true
-                        set -l sub_completions (__gencomp_parse "$cmd" "$words[2]" "$use_command" false)
+                        test "$verbose" = true; and echo "  subcommand: $cmd $words[2]" >&2
+                        set -l sub_completions (__gencomp_parse "$cmd" "$words[2]" "$use_command" false "$verbose")
                         if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
-                            set sub_completions (__gencomp_parse "$cmd" "$words[2]" '{} --help' false)
+                            set sub_completions (__gencomp_parse "$cmd" "$words[2]" '{} --help' false "$verbose")
                         end
                         printf '%s\n' $sub_completions
                     end
@@ -106,9 +108,10 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 if test (count $words) = 3
                     __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]"
                     if test "$is_subcmd_parse_mode" = true
-                        set -l sub_completions (__gencomp_parse "$cmd" "$words[2]" "$use_command" false)
+                        test "$verbose" = true; and echo "  subcommand: $cmd $words[2]" >&2
+                        set -l sub_completions (__gencomp_parse "$cmd" "$words[2]" "$use_command" false "$verbose")
                         if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
-                            set sub_completions (__gencomp_parse "$cmd" "$words[2]" '{} --help' false)
+                            set sub_completions (__gencomp_parse "$cmd" "$words[2]" '{} --help' false "$verbose")
                         end
                         printf '%s\n' $sub_completions
                     end
@@ -165,7 +168,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
     # option parsing with argparse(fish2.7.0)
     argparse -n gencomp -x 'E,e,l' -x 'E,d' -x 'e,d' -x 'l,d' -x 'E,S' -x 'e,S' -x 'l,S' \
-        'd/dry-run' 'E-edit' 'e-erase' 'l/list' 'r/root' 'S/subcommands' 'u/use=' 'w/wraps=+' 'F/fish-version=' 'h/help' -- $argv
+        'd/dry-run' 'E-edit' 'e-erase' 'l/list' 'r/root' 'S/subcommands' 'u/use=' 'w/wraps=+' 'F/fish-version=' 'v/verbose' 'h/help' -- $argv
     or return 1
 
     if set -q _flag_r
@@ -211,6 +214,10 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     set -lq _flag_F
     and set -l target_fish_major $_flag_F
     or set -l target_fish_major (string match -r '^\d+' -- $FISH_VERSION)
+
+    set -lq _flag_v
+    and set -l is_verbose true
+    or set -l is_verbose false
 
     # subcommand parsing requires a place holder in $use_command
     string match -q "*{}*" -- "$use_command"
@@ -269,6 +276,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 end
 
                 if count $wrap_commands >/dev/null
+                    test "$is_verbose" = true; and echo "wrapping: $command (from $wrap_commands)" >&2
                     set -l running_major (string match -r '^\d+' -- $FISH_VERSION)
                     for wrap_command in $wrap_commands
                         complete -C"$wrap_command " >/dev/null # generate autoload completions
@@ -289,7 +297,10 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                     continue
                 end
 
-                for completion in (__gencomp_parse "$command" "" "$use_command" "$is_subcmd_parse_mode")
+                test "$is_verbose" = true; and echo "parsing: $command" >&2
+                set -l count 0
+                for completion in (__gencomp_parse "$command" "" "$use_command" "$is_subcmd_parse_mode" "$is_verbose")
+                    set count (math $count + 1)
                     if test "$is_dry_run" = true
                         echo "$completion"
                     else
@@ -297,6 +308,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                         and echo "$completion" >>$output
                     end
                 end
+                test "$is_verbose" = true; and echo "done: $command ($count completions)" >&2
             end
 
     end

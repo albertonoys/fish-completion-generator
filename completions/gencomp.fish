@@ -7,4 +7,5 @@ complete -x -c gencomp -s S -l subcommands -d 'generate completion for subcomman
 complete -x -c gencomp -s u -l use -d 'use the specified command to get usage'
 complete -x -c gencomp -s w -l wraps -d 'inherit existing completions'
 complete -x -c gencomp -s F -l fish-version -a '3 4' -d 'target fish major version'
+complete -x -c gencomp -s v -l verbose -d 'show progress on stderr'
 complete -x -c gencomp -s h -l help -d 'show this help'

@@ -25,6 +25,7 @@ Options:
                          {} is replaced with 'command [subcommand]'
   -w, --wraps <cmd>      copy completions from another command
   -F, --fish-version <N> target fish major version (default: auto)
+  -v, --verbose          show progress on stderr
 
 Management:
   -l, --list             list generated completions
