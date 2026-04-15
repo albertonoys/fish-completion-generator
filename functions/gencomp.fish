@@ -8,32 +8,38 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
     # usage
     function __gencomp_usage
-        echo "NAME:"
-        echo "    gencomp - Completion generator for fish-shell"
+        echo "gencomp - generate fish-shell completions from --help output"
         echo
-        echo "USAGE:"
-        echo "    gencomp [options] [command names...]"
+        echo "Usage: gencomp [options] <command>..."
+        echo "       gencomp --list | --edit <cmd> | --erase <cmd>..."
         echo
-        echo "OPTIONS:"
-        echo "    -d, --dry-run      print completions without execution"
-        echo "    --edit             edit a generated completion"
-        echo "    --erase            erase generated completions"
-        echo "    -l, --list         list generated completions"
-        echo "    -r, --root         print the directory to save completions"
-        echo "    -S, --subcommands  generate completion for subcommands"
-        echo "    -u, --use          use the specified command to get usage"
-        echo "                       ``{}'' is replaced with the arguments"
-        echo "    -w, --wraps        inherit existing completions"
-        echo "    -h, --help         show this help"
+        echo "Options:"
+        echo "  -d, --dry-run          print generated completions to stdout"
+        echo "  -S, --subcommands      also parse and complete subcommands"
+        echo "  -u, --use <template>   command to get usage (default: '{} --help')"
+        echo "                         {} is replaced with 'command [subcommand]'"
+        echo "  -w, --wraps <cmd>      copy completions from another command"
+        echo "  -F, --fish-version <N> target fish major version (default: auto)"
         echo
-        echo "VARIABLES:"
-        echo "    gencomp_dir        directory to save completions"
+        echo "Management:"
+        echo "  -l, --list             list generated completions"
+        echo "      --edit <cmd>       open a generated completion in \$EDITOR"
+        echo "      --erase <cmd>...   delete generated completions"
+        echo "  -r, --root             print the completions directory"
+        echo "  -h, --help             show this help"
         echo
-        echo "EXAMPLES:"
-        echo "    gencomp peco"
-        echo "    gencomp ghq --subcommands"
-        echo "    gencomp bd --use '{} -h'"
-        echo "    gencomp my-git --wraps git"
+        echo "Variables:"
+        echo "  gencomp_dir            override the completions directory"
+        echo "                         (default: \$XDG_CONFIG_HOME/fish/generated_completions)"
+        echo
+        echo "Examples:"
+        echo "  gencomp peco                             parse peco --help"
+        echo "  gencomp ghq --subcommands                parse subcommands recursively"
+        echo "  gencomp bd --use '{} -h'                 custom help invocation"
+        echo "  gencomp iats -S --use '{} help'          top-level 'help', subcommands '--help'"
+        echo "  gencomp my-git --wraps git               inherit git completions"
+        echo "  gencomp mycmd --wraps othercmd -F 3      target Fish 3.x format"
+        echo "  gencomp mycmd --dry-run                  preview without saving"
     end
 
     # generate `complete ...` statement for option completion
@@ -67,10 +73,10 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     function __gencomp_parse -a cmd sub use_command is_subcmd_parse_mode
         set -l section default
 
-        eval (string replace -a -- "{}" "$cmd $sub" "$use_command") 2>&1 | tr \t ' ' | while read -l line
+        eval (string replace -a -- "{}" "$cmd $sub" "$use_command") 2>&1 | tr \t ' ' | string replace -ra '\e\[[0-9;]*m' '' | while read -l line
 
             # parse subcommand
-            if string match -iqr "^([\w ]* )?commands?( [\w ]*)?" -- "$line"
+            if test "$section" != command; and string match -iqr "^([\w ]* )?commands?( [\w ]*)?" -- "$line"
                 set section command
                 continue
             end
@@ -80,62 +86,75 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 # e.g.)
                 # COMMANDS
                 #     command, c   do something
-                set -l words (string match -r -- '^ +([\w-]+)(?:, *)\w(?:[,= ] *)(.*)' "$line")
+                set -l words (string match -r -- '^ +(\w[\w-]*)(?:, *)\w(?:[,= ] *)(.*)' "$line")
                 if test (count $words) = 3
                     __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]"
                     if test "$is_subcmd_parse_mode" = true
-                        __gencomp_parse "$cmd" "$words[2]" "$use_command" false
+                        set -l sub_completions (__gencomp_parse "$cmd" "$words[2]" "$use_command" false)
+                        if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
+                            set sub_completions (__gencomp_parse "$cmd" "$words[2]" '{} --help' false)
+                        end
+                        printf '%s\n' $sub_completions
                     end
                     continue
                 end
 
                 # e.g.)
                 # COMMANDS
-                #     command    do simething
-                set -l words (string match -r -- '^ +([\w-]+)(?:[,= ] *)(.*)' "$line")
+                #     command    do something
+                set -l words (string match -r -- '^ +(\w[\w-]*)(?:[,= ] *)(.*)' "$line")
                 if test (count $words) = 3
                     __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]"
                     if test "$is_subcmd_parse_mode" = true
-                        __gencomp_parse "$cmd" "$words[2]" "$use_command" false
+                        set -l sub_completions (__gencomp_parse "$cmd" "$words[2]" "$use_command" false)
+                        if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
+                            set sub_completions (__gencomp_parse "$cmd" "$words[2]" '{} --help' false)
+                        end
+                        printf '%s\n' $sub_completions
                     end
                     continue
                 end
 
-                set section default
+                # only leave command section on option-like lines
+                if string match -qr '^\s+-' -- "$line"
+                    set section default
+                else
+                    continue
+                end
             end
 
             # parse options
 
             # e.g.) -h, --help  show help
-            set -l words (string match -r -- "^ *-(\w)(?:, | )--(\w[\w-]+) +(.*)" "$line")
+            set -l words (string match -r -- "^ *-(\w)(?:, | )--(\w[\w-]+)(?:=\S+|\[=\S+\])? +(.*)" "$line")
             if test (count $words) = 4
                 __gencomp_option_completion "$cmd" "$sub" "$words[2]" "$words[3]" "" "$words[4]"
                 continue
             end
 
             # e.g.) --help, -h  show help
-            set -l words (string match -r -- "^ *--(\w[\w-]+)(?:, | )-(\w) +(.*)" "$line")
+            set -l words (string match -r -- "^ *--(\w[\w-]+)(?:=\S+|\[=\S+\])?(?:, | )-(\w) +(.*)" "$line")
             if test (count $words) = 4
                 __gencomp_option_completion "$cmd" "$sub" "$words[3]" "$words[2]" "" "$words[4]"
                 continue
             end
 
-            # e.g.) --help  shiw help
-            set -l words (string match -r -- "^ *--(\w[\w-]+) +(.*)" "$line")
+            # e.g.) --help  show help
+            set -l words (string match -r -- "^ *--(\w[\w-]+)(?:=\S+|\[=\S+\])? +(.*)" "$line")
             if test (count $words) = 3
                 __gencomp_option_completion "$cmd" "$sub" "" "$words[2]" "" "$words[3]"
                 continue
             end
 
-            # e.g.) -h  shiw help
-            set -l words (string match -r -- "^ *-(\w) +(.*)" "$line")
+            # e.g.) -h  show help
+            set -l words (string match -r -- "^ *-(\w)(?:=\S+)? +(.*)" "$line")
             if test (count $words) = 3
                 __gencomp_option_completion "$cmd" "$sub" "$words[2]" "" "" "$words[3]"
                 continue
             end
 
-            # e.g.) -help  shiw help
-            set -l words (string match -r -- "^ *-(\w[\w-]+) +(.*)" "$line")
+            # e.g.) -help  show help
+            set -l words (string match -r -- "^ *-(\w[\w-]+)(?:=\S+|\[=\S+\])? +(.*)" "$line")
             if test (count $words) = 3
                 __gencomp_option_completion "$cmd" "$sub" "" "" "$words[2]" "$words[3]"
                 continue
@@ -146,7 +165,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
     # option parsing with argparse(fish2.7.0)
     argparse -n gencomp -x 'E,e,l' -x 'E,d' -x 'e,d' -x 'l,d' -x 'E,S' -x 'e,S' -x 'l,S' \
-        'd/dry-run' 'E-edit' 'e-erase' 'l/list' 'r/root' 'S/subcommands' 'u/use=' 'w/wraps=+' 'h/help' -- $argv
+        'd/dry-run' 'E-edit' 'e-erase' 'l/list' 'r/root' 'S/subcommands' 'u/use=' 'w/wraps=+' 'F/fish-version=' 'h/help' -- $argv
     or return 1
 
     if set -q _flag_r
@@ -189,10 +208,9 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     and set -l is_subcmd_parse_mode true
     or set -l is_subcmd_parse_mode false
 
-    if set -lq _flag_h
-        __gencomp_usage
-        return
-    end
+    set -lq _flag_F
+    and set -l target_fish_major $_flag_F
+    or set -l target_fish_major (string match -r '^\d+' -- $FISH_VERSION)
 
     # subcommand parsing requires a place holder in $use_command
     string match -q "*{}*" -- "$use_command"
@@ -212,9 +230,9 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
             set -l path "$gencomp_dir/$argv[1].fish"
             if type -q "$EDITOR"
-                eval "$EDITOR $path"
+                $EDITOR -- "$path"
             else if type -q vim
-                eval "vim $path"
+                vim -- "$path"
             else
                 echo "gencomp: editor is not found" >&2
             end
@@ -251,16 +269,24 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 end
 
                 if count $wrap_commands >/dev/null
-                    if not count $wrap_commands >/dev/null
-                        complete -C"$command " >/dev/null # generate autoload completions
-                        complete | string match "* --command $command *" >>$output
-                    else
-                        for wrap_command in $wrap_commands
-                            complete -C"$wrap_command " >/dev/null # generate autoload completions
-                            complete | string match "* --command $wrap_command *" | string replace -- "--command $wrap_command" "--command $command" >>$output
+                    set -l running_major (string match -r '^\d+' -- $FISH_VERSION)
+                    for wrap_command in $wrap_commands
+                        complete -C"$wrap_command " >/dev/null # generate autoload completions
+                        set -l lines
+                        if test "$running_major" -ge 4
+                            set lines (complete | string match -- "complete $wrap_command *" | string replace -- "complete $wrap_command " "")
+                        else
+                            set lines (complete | string match -- "* --command $wrap_command *" | string replace -- "--command $wrap_command " "")
+                        end
+                        for line in $lines
+                            if test "$target_fish_major" -ge 4
+                                echo "complete $command $line" >>$output
+                            else
+                                echo "complete -c $command $line" >>$output
+                            end
                         end
                     end
-                    return 0
+                    continue
                 end
 
                 for completion in (__gencomp_parse "$command" "" "$use_command" "$is_subcmd_parse_mode")
