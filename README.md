@@ -42,7 +42,7 @@ Examples:
   gencomp peco                             parse peco --help
   gencomp ghq --subcommands                parse subcommands recursively
   gencomp bd --use '{} -h'                 custom help invocation
-  gencomp iats -S --use '{} help'          top-level 'help', subcommands '--help'
+  gencomp mycli -S --use '{} help'         top-level 'help', subcommands '--help'
   gencomp my-git --wraps git               inherit git completions
   gencomp mycmd --wraps othercmd -F 3      target Fish 3.x format
   gencomp mycmd --dry-run                  preview without saving

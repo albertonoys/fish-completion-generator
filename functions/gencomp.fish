@@ -15,7 +15,9 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
         echo
         echo "Options:"
         echo "  -d, --dry-run          print generated completions to stdout"
-        echo "  -S, --subcommands      also parse and complete subcommands"
+        echo "  -S, --subcommands      also parse and complete subcommands (depth 1)"
+        echo "  -D, --depth <N>        recurse N levels into subcommands (default: 0)"
+        echo "  -O, --only <regex>     only recurse into matching subcommands (implies -S)"
         echo "  -u, --use <template>   command to get usage (default: '{} --help')"
         echo "                         {} is replaced with 'command [subcommand]'"
         echo "  -w, --wraps <cmd>      copy completions from another command"
@@ -35,9 +37,12 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
         echo
         echo "Examples:"
         echo "  gencomp peco                             parse peco --help"
-        echo "  gencomp ghq --subcommands                parse subcommands recursively"
+        echo "  gencomp ghq --subcommands                parse subcommands (1 level)"
+        echo "  gencomp mycli -S --depth 2 --use '{} help' recurse 2 levels deep"
+        echo "  gencomp mycli -D2 --only 'serve.*' --use '{} help'"
+        echo "                                       only recurse into serve*"
         echo "  gencomp bd --use '{} -h'                 custom help invocation"
-        echo "  gencomp iats -S --use '{} help'          top-level 'help', subcommands '--help'"
+        echo "  gencomp mycli -S --use '{} help'         top-level 'help', subcommands '--help'"
         echo "  gencomp my-git --wraps git               inherit git completions"
         echo "  gencomp mycmd --wraps othercmd -F 3      target Fish 3.x format"
         echo "  gencomp mycmd --dry-run                  preview without saving"
@@ -49,7 +54,8 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
         if test "$long" = version
             echo -n " -n __fish_no_arguments"
         else if test -n "$sub"
-            echo -n ' -n '(string escape -- "__fish_seen_subcommand_from $sub")
+            # Use the deepest subcommand name for the condition
+            echo -n ' -n '(string escape -- "__fish_seen_subcommand_from "(string split ' ' -- "$sub")[-1])
         end
         test -n "$short"
         and echo -n ' -s '(string escape -- "$short")
@@ -63,18 +69,32 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     end
 
     # generate `complete ...` statement for subcommand completion
-    function __gencomp_subcommand_completion -a cmd sub desc
+    function __gencomp_subcommand_completion -a cmd sub desc parent_sub
         echo -n "complete -f -c $cmd"
-        echo -n " -n __fish_use_subcommand -a "(string escape -- "$sub")
+        if test -n "$parent_sub"
+            echo -n " -n "(string escape -- "__fish_seen_subcommand_from "(string split ' ' -- "$parent_sub")[-1])" -a "(string escape -- "$sub")
+        else
+            echo -n " -n __fish_use_subcommand -a "(string escape -- "$sub")
+        end
         echo -n " -d "(string trim -- "$desc" | string escape)
         echo
     end
 
     # parse the usage message
-    function __gencomp_parse -a cmd sub use_command is_subcmd_parse_mode verbose
+    function __gencomp_parse -a cmd sub use_command depth verbose only_pattern
         set -l section default
 
-        eval (string replace -a -- "{}" "$cmd $sub" "$use_command") 2>&1 | tr \t ' ' | string replace -ra '\e\[[0-9;]*m' '' | while read -l line
+        # Build the help command string
+        set -l __gencomp_help_cmd (string replace -a -- "{}" (string trim -- "$cmd $sub") "$use_command")
+
+        # For external commands, wrap with `timeout` to prevent
+        # subprocesses that never exit from hanging gencomp.
+        if command -q timeout; and not functions -q $cmd
+            command timeout -k 2 3 sh -c "$__gencomp_help_cmd 2>&1"
+            test $status -eq 124; and test "$verbose" = true; and echo "  timeout: $__gencomp_help_cmd (killed after 3s)" >&2
+        else
+            eval $__gencomp_help_cmd 2>&1
+        end | tr \t ' ' | string replace -ra '\e\[[0-9;]*m' '' | while read -l line
 
             # parse subcommand
             if test "$section" != command; and string match -iqr "^([\w ]* )?commands?( [\w ]*)?" -- "$line"
@@ -82,21 +102,27 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 continue
             end
 
-            if test "$section" = command -a -z "$sub"
+            if test "$section" = command
 
                 # e.g.)
                 # COMMANDS
                 #     command, c   do something
                 set -l words (string match -r -- '^ +(\w[\w-]*)(?:, *)\w(?:[,= ] *)(.*)' "$line")
                 if test (count $words) = 3
-                    __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]"
-                    if test "$is_subcmd_parse_mode" = true
-                        test "$verbose" = true; and echo "  subcommand: $cmd $words[2]" >&2
-                        set -l sub_completions (__gencomp_parse "$cmd" "$words[2]" "$use_command" false "$verbose")
-                        if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
-                            set sub_completions (__gencomp_parse "$cmd" "$words[2]" '{} --help' false "$verbose")
+                    __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]" "$sub"
+                    if test "$depth" -gt 0
+                        # --only filter applies at the top level only
+                        if test -z "$only_pattern"; or test -n "$sub"; or string match -rq -- "$only_pattern" "$words[2]"
+                            set -l new_sub (string trim -- "$sub $words[2]")
+                            set -l child_depth (math "$depth - 1")
+                            test "$verbose" = true; and echo "  subcommand: $cmd $new_sub" >&2
+                            set -l sub_completions (__gencomp_parse "$cmd" "$new_sub" "$use_command" "$child_depth" "$verbose" "")
+                            if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
+                                set sub_completions (__gencomp_parse "$cmd" "$new_sub" '{} --help' "$child_depth" "$verbose" "")
+                            end
+                            test "$verbose" = true; and echo "    options: "(count $sub_completions) >&2
+                            printf '%s\n' $sub_completions
                         end
-                        printf '%s\n' $sub_completions
                     end
                     continue
                 end
@@ -106,14 +132,20 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 #     command    do something
                 set -l words (string match -r -- '^ +(\w[\w-]*)(?:[,= ] *)(.*)' "$line")
                 if test (count $words) = 3
-                    __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]"
-                    if test "$is_subcmd_parse_mode" = true
-                        test "$verbose" = true; and echo "  subcommand: $cmd $words[2]" >&2
-                        set -l sub_completions (__gencomp_parse "$cmd" "$words[2]" "$use_command" false "$verbose")
-                        if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
-                            set sub_completions (__gencomp_parse "$cmd" "$words[2]" '{} --help' false "$verbose")
+                    __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]" "$sub"
+                    if test "$depth" -gt 0
+                        # --only filter applies at the top level only
+                        if test -z "$only_pattern"; or test -n "$sub"; or string match -rq -- "$only_pattern" "$words[2]"
+                            set -l new_sub (string trim -- "$sub $words[2]")
+                            set -l child_depth (math "$depth - 1")
+                            test "$verbose" = true; and echo "  subcommand: $cmd $new_sub" >&2
+                            set -l sub_completions (__gencomp_parse "$cmd" "$new_sub" "$use_command" "$child_depth" "$verbose" "")
+                            if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
+                                set sub_completions (__gencomp_parse "$cmd" "$new_sub" '{} --help' "$child_depth" "$verbose" "")
+                            end
+                            test "$verbose" = true; and echo "    options: "(count $sub_completions) >&2
+                            printf '%s\n' $sub_completions
                         end
-                        printf '%s\n' $sub_completions
                     end
                     continue
                 end
@@ -167,8 +199,8 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     end
 
     # option parsing with argparse(fish2.7.0)
-    argparse -n gencomp -x 'E,e,l' -x 'E,d' -x 'e,d' -x 'l,d' -x 'E,S' -x 'e,S' -x 'l,S' \
-        'd/dry-run' 'E-edit' 'e-erase' 'l/list' 'r/root' 'S/subcommands' 'u/use=' 'w/wraps=+' 'F/fish-version=' 'v/verbose' 'h/help' -- $argv
+    argparse -n gencomp -x 'E,e,l' -x 'E,d' -x 'e,d' -x 'l,d' -x 'E,S' -x 'e,S' -x 'l,S' -x 'E,D' -x 'e,D' -x 'l,D' -x 'E,O' -x 'e,O' -x 'l,O' \
+        'd/dry-run' 'E-edit' 'e-erase' 'l/list' 'r/root' 'S/subcommands' 'D/depth=' 'O/only=' 'u/use=' 'w/wraps=+' 'F/fish-version=' 'v/verbose' 'h/help' -- $argv
     or return 1
 
     if set -q _flag_r
@@ -207,9 +239,20 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     and set -l wrap_commands $_flag_w
     or set -l wrap_commands
 
-    set -lq _flag_S
-    and set -l is_subcmd_parse_mode true
-    or set -l is_subcmd_parse_mode false
+    # Determine subcommand recursion depth
+    set -l subcmd_depth 0
+    if set -q _flag_D
+        set subcmd_depth $_flag_D
+    else if set -q _flag_S
+        set subcmd_depth 1
+    end
+
+    # --only implies at least depth 1
+    set -l only_pattern ""
+    if set -q _flag_O
+        set only_pattern $_flag_O
+        test "$subcmd_depth" -lt 1; and set subcmd_depth 1
+    end
 
     set -lq _flag_F
     and set -l target_fish_major $_flag_F
@@ -221,7 +264,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
     # subcommand parsing requires a place holder in $use_command
     string match -q "*{}*" -- "$use_command"
-    or set -l is_subcmd_parse_mode false
+    or set subcmd_depth 0
 
     switch "$action"
         case edit
@@ -298,8 +341,31 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 end
 
                 test "$is_verbose" = true; and echo "parsing: $command" >&2
+
+                # When --only is set, discover subcommands first and confirm
+                if test -n "$only_pattern"; and test "$subcmd_depth" -gt 0
+                    set -l all_subs (__gencomp_parse "$command" "" "$use_command" 0 false "" | string replace -rf '.*-n __fish_use_subcommand -a (\S+).*' '$1')
+                    set -l matched
+                    for s in $all_subs
+                        string match -rq -- "$only_pattern" "$s"; and set -a matched $s
+                    end
+
+                    if test (count $matched) -eq 0
+                        echo "gencomp: no subcommands of '$command' match '$only_pattern'" >&2
+                        continue
+                    end
+
+                    echo "Will recurse into (depth $subcmd_depth):" >&2
+                    printf '  %s\n' $matched >&2
+                    read -P "Proceed? [Y/n] " -l confirm
+                    if string match -rq '^[nN]' -- "$confirm"
+                        echo "Aborted." >&2
+                        continue
+                    end
+                end
+
                 set -l count 0
-                for completion in (__gencomp_parse "$command" "" "$use_command" "$is_subcmd_parse_mode" "$is_verbose")
+                for completion in (__gencomp_parse "$command" "" "$use_command" "$subcmd_depth" "$is_verbose" "$only_pattern")
                     set count (math $count + 1)
                     if test "$is_dry_run" = true
                         echo "$completion"
