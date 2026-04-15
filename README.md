@@ -1,55 +1,56 @@
-:us: [:jp:](https://github.com/ryotako/fish-completion-generator/wiki)
-
 # fish-completion-generator
 
-[![Build Status][travis-badge]][travis-link]
-[![Slack Room][slack-badge]][slack-link]
-[![fish2.7.0](https://img.shields.io/badge/fish-2.7.0-brightgreen.svg)](https://github.com/fish-shell/fish-shell)
-
-generate completions for fish-shell with `--help` option
+Generate completions for [fish shell](https://fishshell.com) by parsing `--help` output.
 
 ## Install
 
-With [fisherman]
+With [Fisher](https://github.com/jorgebucaran/fisher):
 
-```
-fisher ryotako/fish-completion-generator
+```fish
+fisher install albertonoys/fish-completion-generator
 ```
 
 ## Usage
 
-```fish
-NAME:
-    gencomp - Completion generator for fish-shell
+```
+gencomp - generate fish-shell completions from --help output
 
-USAGE:
-    gencomp [options] [command names...]
+Usage: gencomp [options] <command>...
+       gencomp --list | --edit <cmd> | --erase <cmd>...
 
-OPTIONS:
-    -d, --dry-run      print completions without execution
-    --edit             edit a generated completion
-    --erase            erase generated completions
-    -l, --list         list generated completions
-    -r, --root         print the directory to save completions
-    -S, --subcommands  generate completion for subcommands
-    -u, --use          use the specified command to get usage
-                       ``{}'' is replaced with the arguments
-    -w, --wraps        inherit existing completions
-    -h, --help         show this help
+Options:
+  -d, --dry-run          print generated completions to stdout
+  -S, --subcommands      also parse and complete subcommands
+  -u, --use <template>   command to get usage (default: '{} --help')
+                         {} is replaced with 'command [subcommand]'
+  -w, --wraps <cmd>      copy completions from another command
+  -F, --fish-version <N> target fish major version (default: auto)
 
-VARIABLES:
-    gencomp_dir        directory to save completions
+Management:
+  -l, --list             list generated completions
+      --edit <cmd>       open a generated completion in $EDITOR
+      --erase <cmd>...   delete generated completions
+  -r, --root             print the completions directory
+  -h, --help             show this help
 
-EXAMPLES:
-    gencomp peco
-    gencomp ghq --subcommands
-    gencomp bd --use '{} -h'
-    gencomp my-git --wraps git
+Variables:
+  gencomp_dir            override the completions directory
+                         (default: $XDG_CONFIG_HOME/fish/generated_completions)
+
+Examples:
+  gencomp peco                             parse peco --help
+  gencomp ghq --subcommands                parse subcommands recursively
+  gencomp bd --use '{} -h'                 custom help invocation
+  gencomp iats -S --use '{} help'          top-level 'help', subcommands '--help'
+  gencomp my-git --wraps git               inherit git completions
+  gencomp mycmd --wraps othercmd -F 3      target Fish 3.x format
+  gencomp mycmd --dry-run                  preview without saving
 ```
 
+## Credits
 
-[travis-link]: https://travis-ci.org/ryotako/fish-completion-generator
-[travis-badge]: https://img.shields.io/travis/ryotako/fish-completion-generator.svg
-[slack-link]: https://fisherman-wharf.herokuapp.com
-[slack-badge]: https://fisherman-wharf.herokuapp.com/badge.svg
-[fisherman]: https://github.com/fisherman/fisherman
+Fork of [ryotako/fish-completion-generator](https://github.com/ryotako/fish-completion-generator), unmaintained since 2017.
+
+## License
+
+[MIT](LICENCE)
