@@ -83,7 +83,8 @@ than expected.
 
 ## Credits
 
-Fork of [ryotako/fish-completion-generator](https://github.com/ryotako/fish-completion-generator), unmaintained since 2017.
+Fork of [ryotako/fish-completion-generator](https://github.com/ryotako/fish-completion-generator) by Ryota Kobayashi, which has had no commits since February 2018. 
+The parser, option handling, and test suite have been substantially rewritten since.
 
 ## License
 
