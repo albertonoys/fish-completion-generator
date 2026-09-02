@@ -386,6 +386,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
             end
 
         case complete
+            set -l had_skip false
             for command in $argv
                 if not type -q "$command"
                     echo "gencomp: command '$command' is not found" >&2
@@ -401,15 +402,22 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                     # replaced once the user has seen the diff and agreed to it
                     set target "$gencomp_dir/$command.fish"
                     # keep the basename so the diff header reads $command.fish
+                    # a completion fish loads first makes ours dead weight, so
+                    # say so and generate nothing unless forced
+                    set -l shadow (__gencomp_shadowing_file "$command" "$target")
+                    if test -n "$shadow"
+                        echo "gencomp: $shadow is loaded before $target" >&2
+                        if test "$is_force" != true
+                            echo "gencomp: nothing generated for $command -- fish would use that file (--force to write anyway)" >&2
+                            set had_skip true
+                            continue
+                        end
+                        echo "gencomp: writing anyway (--force), though fish will still use that file" >&2
+                    end
+
                     set -l tmpdir (mktemp -d)
                     or continue
                     set output "$tmpdir/$command.fish"
-
-                    set -l shadow (__gencomp_shadowing_file "$command" "$target")
-                    and begin
-                        echo "gencomp: warning: $shadow is loaded before $target" >&2
-                        echo "gencomp: fish will use that file, not the one being generated" >&2
-                    end
                 end
 
                 if count $wrap_commands >/dev/null
@@ -477,6 +485,9 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 test "$is_dry_run" = true
                 or __gencomp_finalize "$output" "$target" "$is_force"
             end
+
+            test "$had_skip" = false
+            or return 1
 
     end
 end
