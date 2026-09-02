@@ -426,15 +426,13 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
                 if count $wrap_commands >/dev/null
                     test "$is_verbose" = true; and echo "wrapping: $command (from $wrap_commands)" >&2
-                    set -l running_major (string match -r '^\d+' -- $FISH_VERSION)
                     for wrap_command in $wrap_commands
                         complete -C"$wrap_command " >/dev/null # generate autoload completions
-                        set -l lines
-                        if test "$running_major" -ge 4
-                            set lines (complete | string match -- "complete $wrap_command *" | string replace -- "complete $wrap_command " "")
-                        else
-                            set lines (complete | string match -- "* --command $wrap_command *" | string replace -- "--command $wrap_command " "")
-                        end
+                        # `complete` names the command positionally (fish 4), as
+                        # `-c cmd`, or as `--command cmd` depending on the
+                        # version, so accept all three and keep what follows
+                        set -l prefix '^complete\s+(?:-c\s+|--command\s+)?'(string escape --style=regex -- "$wrap_command")'\s+'
+                        set -l lines (complete | string replace -rf -- $prefix '')
                         for line in $lines
                             if test "$target_fish_major" -ge 4
                                 echo "complete $command $line" >>$output
