@@ -47,4 +47,12 @@ set -l warned (gencomp __gencomp_dummy_command1 --force 2>&1 >/dev/null | string
 @test "shadow: names the shadowing file" -n (echo $warned | string match -r "$early/__gencomp_dummy_command1.fish")
 @test "shadow: still generates the file" -f "$gencomp_dir/__gencomp_dummy_command1.fish"
 
+gencomp __gencomp_dummy_command1 >/dev/null 2>&1
+@test "shadow: refuses without --force" $status -eq 1
+set -l blocked (gencomp __gencomp_dummy_command1 2>&1 >/dev/null | string collect)
+@test "shadow: says nothing was generated" -n (echo $blocked | string match -r "nothing generated")
+
+gencomp __gencomp_no_such_command_xyz >/dev/null 2>&1
+@test "exit status: unknown command fails" $status -eq 1
+
 set -g fish_complete_path $old_complete_path

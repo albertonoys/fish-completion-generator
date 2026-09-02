@@ -386,10 +386,11 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
             end
 
         case complete
-            set -l had_skip false
+            set -l had_failure false
             for command in $argv
                 if not type -q "$command"
                     echo "gencomp: command '$command' is not found" >&2
+                    set had_failure true
                     continue
                 end
 
@@ -409,14 +410,17 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                         echo "gencomp: $shadow is loaded before $target" >&2
                         if test "$is_force" != true
                             echo "gencomp: nothing generated for $command -- fish would use that file (--force to write anyway)" >&2
-                            set had_skip true
+                            set had_failure true
                             continue
                         end
                         echo "gencomp: writing anyway (--force), though fish will still use that file" >&2
                     end
 
                     set -l tmpdir (mktemp -d)
-                    or continue
+                    or begin
+                        set had_failure true
+                        continue
+                    end
                     set output "$tmpdir/$command.fish"
                 end
 
@@ -439,8 +443,10 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                             end
                         end
                     end
-                    test "$is_dry_run" = true
-                    or __gencomp_finalize "$output" "$target" "$is_force"
+                    if test "$is_dry_run" != true
+                        __gencomp_finalize "$output" "$target" "$is_force"
+                        or set had_failure true
+                    end
                     continue
                 end
 
@@ -457,6 +463,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                     if test (count $matched) -eq 0
                         echo "gencomp: no subcommands of '$command' match '$only_pattern'" >&2
                         test "$is_dry_run" = true; or __gencomp_discard "$output"
+                        set had_failure true
                         continue
                     end
 
@@ -466,6 +473,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                     if string match -rq '^[nN]' -- "$confirm"
                         echo "Aborted." >&2
                         test "$is_dry_run" = true; or __gencomp_discard "$output"
+                        set had_failure true
                         continue
                     end
                 end
@@ -482,11 +490,13 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 end
                 test "$is_verbose" = true; and echo "done: $command ($count completions)" >&2
 
-                test "$is_dry_run" = true
-                or __gencomp_finalize "$output" "$target" "$is_force"
+                if test "$is_dry_run" != true
+                    __gencomp_finalize "$output" "$target" "$is_force"
+                    or set had_failure true
+                end
             end
 
-            test "$had_skip" = false
+            test "$had_failure" = false
             or return 1
 
     end
