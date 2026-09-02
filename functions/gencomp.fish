@@ -15,6 +15,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
         echo
         echo "Options:"
         echo "  -d, --dry-run          print generated completions to stdout"
+        echo "  -f, --force            overwrite an existing completion without asking"
         echo "  -S, --subcommands      also parse and complete subcommands (depth 1)"
         echo "  -D, --depth <N>        recurse N levels into subcommands (default: 0)"
         echo "  -O, --only <regex>     only recurse into matching subcommands (implies -S)"
@@ -46,6 +47,87 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
         echo "  gencomp my-git --wraps git               inherit git completions"
         echo "  gencomp mycmd --wraps othercmd -F 3      target Fish 3.x format"
         echo "  gencomp mycmd --dry-run                  preview without saving"
+    end
+
+    # show what would change in an existing completion file
+    function __gencomp_show_diff -a old new
+        if command -q delta
+            delta --paging=never -- "$old" "$new"
+        else if diff --help 2>/dev/null | string match -q '*--color*'
+            diff -u --color=always -- "$old" "$new"
+        else
+            diff -u -- "$old" "$new"
+        end
+    end
+
+    function __gencomp_confirm -a prompt
+        if not isatty stdin
+            echo "gencomp: not a terminal, refusing to overwrite (use --force)" >&2
+            return 1
+        end
+        if command -q gum
+            gum confirm --default=false "$prompt"
+        else
+            read -P "$prompt [y/N] " -l answer
+            string match -qi y -- $answer
+        end
+    end
+
+    # fish loads the first $command.fish it finds on $fish_complete_path, so a
+    # file in an earlier directory (usually ~/.config/fish/completions) hides
+    # whatever we generate
+    function __gencomp_shadowing_file -a command target
+        set -l target_dir (dirname "$target")
+        for dir in $fish_complete_path
+            test "$dir" = "$target_dir"; and return 1
+            test -f "$dir/$command.fish"; or continue
+            echo "$dir/$command.fish"
+            return 0
+        end
+        return 1
+    end
+
+    function __gencomp_discard -a tmpfile
+        rm -f "$tmpfile"
+        rmdir (dirname "$tmpfile") 2>/dev/null
+    end
+
+    # move a freshly generated file into place, prompting before clobbering an
+    # existing one (default: keep what is already there)
+    function __gencomp_finalize -a tmpfile target force
+        if not test -s "$tmpfile"
+            __gencomp_discard "$tmpfile"
+            echo "gencomp: nothing generated for $target" >&2
+            return 1
+        end
+
+        if test -f "$target"
+            if cmp -s "$tmpfile" "$target"
+                __gencomp_discard "$tmpfile"
+                echo "gencomp: $target is already up to date"
+                return 0
+            end
+
+            if test "$force" != true
+                echo "gencomp: $target already exists and would change:"
+                __gencomp_show_diff "$target" "$tmpfile"
+                if not __gencomp_confirm "Overwrite $target?"
+                    __gencomp_discard "$tmpfile"
+                    echo "gencomp: kept existing $target"
+                    echo "gencomp: (the parsed completions are loaded in this shell until you restart it)"
+                    return 1
+                end
+            end
+        end
+
+        mkdir -p (dirname "$target")
+        or begin
+            __gencomp_discard "$tmpfile"
+            return 1
+        end
+        chmod 644 "$tmpfile"
+        mv "$tmpfile" "$target"
+        rmdir (dirname "$tmpfile") 2>/dev/null
     end
 
     # generate `complete ...` statement for option completion
@@ -200,7 +282,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
     # option parsing with argparse(fish2.7.0)
     argparse -n gencomp -x 'E,e,l' -x 'E,d' -x 'e,d' -x 'l,d' -x 'E,S' -x 'e,S' -x 'l,S' -x 'E,D' -x 'e,D' -x 'l,D' -x 'E,O' -x 'e,O' -x 'l,O' \
-        'd/dry-run' 'E-edit' 'e-erase' 'l/list' 'r/root' 'S/subcommands' 'D/depth=' 'O/only=' 'u/use=' 'w/wraps=+' 'F/fish-version=' 'v/verbose' 'h/help' -- $argv
+        'd/dry-run' 'f/force' 'E-edit' 'e-erase' 'l/list' 'r/root' 'S/subcommands' 'D/depth=' 'O/only=' 'u/use=' 'w/wraps=+' 'F/fish-version=' 'v/verbose' 'h/help' -- $argv
     or return 1
 
     if set -q _flag_r
@@ -230,6 +312,10 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     set -lq _flag_d
     and set -l is_dry_run true
     or set -l is_dry_run false
+
+    set -lq _flag_f
+    and set -l is_force true
+    or set -l is_force false
 
     set -lq _flag_u
     and set -l use_command $_flag_u
@@ -307,15 +393,23 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                 end
 
                 set -l output
+                set -l target
                 if test "$is_dry_run" = true
                     set output /dev/stdout
                 else
-                    mkdir -p "$gencomp_dir"
+                    # generate into a temp file so an existing completion is only
+                    # replaced once the user has seen the diff and agreed to it
+                    set target "$gencomp_dir/$command.fish"
+                    # keep the basename so the diff header reads $command.fish
+                    set -l tmpdir (mktemp -d)
                     or continue
-                    echo -n >"$gencomp_dir/$command.fish"
-                    or continue
+                    set output "$tmpdir/$command.fish"
 
-                    set output "$gencomp_dir/$command.fish"
+                    set -l shadow (__gencomp_shadowing_file "$command" "$target")
+                    and begin
+                        echo "gencomp: warning: $shadow is loaded before $target" >&2
+                        echo "gencomp: fish will use that file, not the one being generated" >&2
+                    end
                 end
 
                 if count $wrap_commands >/dev/null
@@ -337,6 +431,8 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                             end
                         end
                     end
+                    test "$is_dry_run" = true
+                    or __gencomp_finalize "$output" "$target" "$is_force"
                     continue
                 end
 
@@ -352,6 +448,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
                     if test (count $matched) -eq 0
                         echo "gencomp: no subcommands of '$command' match '$only_pattern'" >&2
+                        test "$is_dry_run" = true; or __gencomp_discard "$output"
                         continue
                     end
 
@@ -360,6 +457,7 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                     read -P "Proceed? [Y/n] " -l confirm
                     if string match -rq '^[nN]' -- "$confirm"
                         echo "Aborted." >&2
+                        test "$is_dry_run" = true; or __gencomp_discard "$output"
                         continue
                     end
                 end
@@ -375,6 +473,9 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
                     end
                 end
                 test "$is_verbose" = true; and echo "done: $command ($count completions)" >&2
+
+                test "$is_dry_run" = true
+                or __gencomp_finalize "$output" "$target" "$is_force"
             end
 
     end
