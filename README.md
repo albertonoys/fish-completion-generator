@@ -44,14 +44,14 @@ Variables:
 Examples:
   gencomp peco                             parse peco --help
   gencomp ghq --subcommands                parse subcommands (1 level)
-  gencomp mycli -S --depth 2 --use '{} help' recurse 2 levels deep
-  gencomp mycli -D2 --only 'serve.*' --use '{} help'
-                                       only recurse into serve*
+  gencomp mycli -S -D 2 --use '{} help'    recurse 2 levels deep
+  gencomp mycli -D 2 -O 'serve.*'          only recurse into serve*
   gencomp bd --use '{} -h'                 custom help invocation
   gencomp mycli -S --use '{} help'         top-level 'help', subcommands '--help'
   gencomp my-git --wraps git               inherit git completions
   gencomp mycmd --wraps othercmd -F 3      target Fish 3.x format
   gencomp mycmd --dry-run                  preview without saving
+  gencomp mycmd --force                    overwrite without asking
 ```
 
 ## Overwriting existing completions
@@ -62,13 +62,22 @@ disk, `gencomp` prints the diff (using [delta](https://github.com/dandavison/del
 when available, otherwise `diff`) and asks before replacing it — defaulting to
 **keeping the existing file**. Regenerating identical content is a no-op.
 
-`gencomp` also warns when the command already has a completion file earlier on
-`$fish_complete_path` (`~/.config/fish/completions`, vendor completions, ...),
-since fish loads the first match and the generated file would never be used.
+If the command already has a completion file earlier on `$fish_complete_path`
+(`~/.config/fish/completions`, vendor completions, ...), `gencomp` generates
+nothing and exits non-zero: fish loads the first match, so the generated file
+would never be used. `--force` writes it anyway, but fish still loads the
+shadowing file, not the generated one.
 
 Use `--force` to skip the prompt. When there is no terminal to prompt on (a
 script, a pipeline, CI), `gencomp` refuses to overwrite and keeps the existing
 file unless `--force` is given.
+
+## Troubleshooting
+
+`--verbose` reports progress on stderr: each subcommand as it is parsed, how
+many options were found for it, and any help invocation that had to be killed
+by the 3-second timeout. Reach for it when a command yields fewer completions
+than expected.
 
 ## Credits
 

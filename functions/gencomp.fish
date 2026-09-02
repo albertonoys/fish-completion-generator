@@ -39,14 +39,14 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
         echo "Examples:"
         echo "  gencomp peco                             parse peco --help"
         echo "  gencomp ghq --subcommands                parse subcommands (1 level)"
-        echo "  gencomp mycli -S --depth 2 --use '{} help' recurse 2 levels deep"
-        echo "  gencomp mycli -D2 --only 'serve.*' --use '{} help'"
-        echo "                                       only recurse into serve*"
+        echo "  gencomp mycli -S -D 2 --use '{} help'    recurse 2 levels deep"
+        echo "  gencomp mycli -D 2 -O 'serve.*'          only recurse into serve*"
         echo "  gencomp bd --use '{} -h'                 custom help invocation"
         echo "  gencomp mycli -S --use '{} help'         top-level 'help', subcommands '--help'"
         echo "  gencomp my-git --wraps git               inherit git completions"
         echo "  gencomp mycmd --wraps othercmd -F 3      target Fish 3.x format"
         echo "  gencomp mycmd --dry-run                  preview without saving"
+        echo "  gencomp mycmd --force                    overwrite without asking"
     end
 
     # show what would change in an existing completion file
