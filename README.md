@@ -1,5 +1,7 @@
 # fish-completion-generator
 
+[![test](https://github.com/albertonoys/fish-completion-generator/actions/workflows/test.yml/badge.svg)](https://github.com/albertonoys/fish-completion-generator/actions/workflows/test.yml)
+
 Generate completions for [fish shell](https://fishshell.com) by parsing `--help` output.
 
 ## Install
