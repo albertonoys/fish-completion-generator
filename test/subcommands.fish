@@ -40,14 +40,15 @@ rm -f "$__gencomp_dir"/*.fish
 gencomp __gencomp_dummy_wrap_source >/dev/null
 gencomp __gencomp_dummy_wrap_target --wraps __gencomp_dummy_wrap_source >/dev/null
 source "$__gencomp_dir/__gencomp_dummy_wrap_target.fish"
-set -l result (complete -C"__gencomp_dummy_wrap_target -" | awk '{print $1}' | sort | string join " ")
-@test "wraps: inherit completions from another command" "$result" = "-q --quiet -v --verbose"
+# LC_ALL=C so the order does not depend on the runner's collation
+set -l result (complete -C"__gencomp_dummy_wrap_target -" | awk '{print $1}' | env LC_ALL=C sort | string join " ")
+@test "wraps: inherit completions from another command" "$result" = "--quiet --verbose -q -v"
 gencomp --erase __gencomp_dummy_wrap_source __gencomp_dummy_wrap_target
 
 for f in "$__gencomp_dir"/*.fish; rm -f "$f"; end 2>/dev/null
 gencomp __gencomp_dummy_wrap_source >/dev/null
 gencomp __gencomp_dummy_wrap_a __gencomp_dummy_wrap_b --wraps __gencomp_dummy_wrap_source >/dev/null
-set -l result (gencomp --list | sort | string join " ")
+set -l result (gencomp --list | env LC_ALL=C sort | string join " ")
 @test "wraps: multiple target commands are all generated" "$result" = "__gencomp_dummy_wrap_a __gencomp_dummy_wrap_b __gencomp_dummy_wrap_source"
 gencomp --erase __gencomp_dummy_wrap_source __gencomp_dummy_wrap_a __gencomp_dummy_wrap_b
 
