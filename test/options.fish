@@ -18,7 +18,7 @@ set -l result (gencomp __gencomp_dummy_all_formats --dry-run)
 @test "options: --help, -h (long then short)" (string match -- "*-s h*-l help*" $result | count) -gt 0
 @test "options: --version (long only)" (string match -- "*-l version*" $result | count) -gt 0
 @test "options: -q (short only)" (string match -- "*-s q*" $result | count) -gt 0
-@test "options: -debug (old style)" (string match -- "*debug*" $result | count) -gt 0
+@test "options: -debug (old style)" (string match -- "*-o debug*" $result | count) -gt 0
 
 @echo "--- --use custom help ---"
 

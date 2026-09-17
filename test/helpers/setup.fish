@@ -237,3 +237,57 @@ COMMANDS:
         end
     end
 end
+
+# commander.js-style help (e.g. claude): wrapped descriptions aligned to a
+# deep column, <arg>/[arg] placeholders, a|b aliases, prose mentioning
+# "commands", an examples block inside Commands
+function __gencomp_dummy_wrapped
+    switch "$argv[1]"
+        case -h --help
+            printf '%s\n' \
+                'Usage: wrapped [options] [command]' \
+                '' \
+                'Options:' \
+                '  --add-dir <directories...>            Additional directories to allow tool' \
+                '                                        access to' \
+                '  --bg, --background                    Start in the background. With' \
+                '                                        --resume <session-id>, continues that' \
+                '  --restricted                          Removes the built-in' \
+                '  --allowedTools, --allowed-tools <tools...>' \
+                '      Comma or space-separated list of tool names to allow' \
+                '  --exclude-dynamic-system-prompt-sections' \
+                '      Move per-machine sections into the first message' \
+                '  --name-prefix <prefix>' \
+                '      Prefix for auto-generated session names' \
+                '                                        tools that run commands or code (Bash,' \
+                '                                        PowerShell, REPL and the other' \
+                '  -h, --help                            Display help for command' \
+                '' \
+                'Commands:' \
+                '  agents [options]                      Manage background agents' \
+                '  doctor                                Check the health. Reads settings in' \
+                '                                        the current directory without a trust' \
+                '  add [options] <name> <url>  Add a server.' \
+                '  ' \
+                '  Examples:' \
+                '    wrapped add --transport http sentry https://example.com' \
+                '  plugin|plugins                        Manage plugins' \
+                '  stop|kill <id>                        Stop a background session'
+    end
+end
+
+# flag lines in other common shapes, plus prose that must not become options
+function __gencomp_dummy_flag_lists
+    switch "$argv[1]"
+        case -h --help
+            printf '%s\n' \
+                'OPTIONS:' \
+                '   -y, --yes, --assume-yes   answer yes to prompts' \
+                '   -o FILE, --output=FILE' \
+                '   --no-color' \
+                '   -q' \
+                '   --tools names them, and ignores user settings' \
+                '   -x is deprecated' \
+                '   --see also the manual'
+    end
+end

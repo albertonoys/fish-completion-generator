@@ -24,6 +24,20 @@ set -l result (gencomp __gencomp_dummy_multiline --dry-run | string replace -rf 
 set -l result (gencomp __gencomp_dummy_ansi --dry-run | string replace -rf '.*-a (\S+).*' '$1' | string join " ")
 @test "subcommands: ANSI escape codes do not break parsing" "$result" = "alpha beta gamma"
 
+@echo "--- commander-style help (wrapped, placeholders, aliases) ---"
+
+set -l out (gencomp __gencomp_dummy_wrapped --dry-run)
+set -l result (string replace -rf '.*-a (\S+).*' '$1' -- $out | string join " ")
+@test "subcommands: prose and wrapped lines are not subcommands" "$result" = "agents doctor add plugin plugins stop kill"
+@test "subcommands: <arg>/[arg] placeholders stripped from description" (string match -- "*-a add -d 'Add a server.'" $out | count) -eq 1
+@test "options: wrapped line starting with --flag is not an option" (string match -- "*-l resume*" $out | count) -eq 0
+@test "options: <arg> placeholder stripped from description" (string match -- "*-l add-dir -d 'Additional directories to allow tool'" $out | count) -eq 1
+
+@test "options: flag lists and next-line descriptions are all found" (string match -- '* -l *' $out | string replace -r '^complete -c \S+ ' '' | string join ";") = "-l add-dir -d 'Additional directories to allow tool';-l bg -l background -d 'Start in the background. With';-l restricted -d 'Removes the built-in';-l allowedTools -l allowed-tools;-l exclude-dynamic-system-prompt-sections;-l name-prefix;-s h -l help -d 'Display help for command'"
+
+set -l out (gencomp __gencomp_dummy_flag_lists --dry-run | string replace -r '^complete -c \S+ ' '' | string join ";")
+@test "options: flag lists found, prose starting with a flag rejected" "$out" = "-s y -l yes -l assume-yes -d 'answer yes to prompts';-s o -l output;-l no-color;-s q"
+
 @echo "--- --help fallback ---"
 
 complete --erase __gencomp_dummy_mixed_help

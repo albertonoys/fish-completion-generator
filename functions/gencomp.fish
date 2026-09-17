@@ -133,20 +133,26 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
     # generate `complete ...` statement for option completion
     function __gencomp_option_completion -a cmd sub short long old desc
         echo -n "complete -c $cmd"
-        if test "$long" = version
+        # short, long and old may each hold several space-separated flags
+        if contains version (string split ' ' -- "$long")
             echo -n " -n __fish_no_arguments"
         else if test -n "$sub"
             # Use the deepest subcommand name for the condition
             echo -n ' -n '(string escape -- "__fish_seen_subcommand_from "(string split ' ' -- "$sub")[-1])
         end
-        test -n "$short"
-        and echo -n ' -s '(string escape -- "$short")
-        test -n "$long"
-        and echo -n ' -l '(string escape -- "$long")
-        test -n "$old"
-        and echo -n ' -s '(string escape -- "$old")
+        for flag in (string split -n ' ' -- "$short")
+            echo -n ' -s '(string escape -- "$flag")
+        end
+        for flag in (string split -n ' ' -- "$long")
+            echo -n ' -l '(string escape -- "$flag")
+        end
+        for flag in (string split -n ' ' -- "$old")
+            echo -n ' -o '(string escape -- "$flag")
+        end
+        # a description that is only <arg>/[arg] belongs to the flag, not prose
+        set desc (string trim -- "$desc" | string replace -r -- '^(?:[\[<][^\]>]*[\]>]+ +)*[\[<][^\]>]*[\]>]+(?: {2,}|$)' '')
         test -n "$desc"
-        and echo -n ' -d '(string trim -- "$desc" | string escape)
+        and echo -n ' -d '(string escape -- "$desc")
         echo
     end
 
@@ -158,13 +164,18 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
         else
             echo -n " -n __fish_use_subcommand -a "(string escape -- "$sub")
         end
-        echo -n " -d "(string trim -- "$desc" | string escape)
+        set desc (string trim -- "$desc" | string replace -r -- '^(?:[\[<][^\]>]*[\]>]+ +)*[\[<][^\]>]*[\]>]+(?: {2,}|$)' '')
+        test -n "$desc"
+        and echo -n " -d "(string escape -- "$desc")
         echo
     end
 
     # parse the usage message
     function __gencomp_parse -a cmd sub use_command depth verbose only_pattern
         set -l section default
+        set -l cmd_indent
+        set -l desc_col
+        set -l desc_cols
 
         # Build the help command string
         set -l __gencomp_help_cmd (string replace -a -- "{}" (string trim -- "$cmd $sub") "$use_command")
@@ -179,49 +190,46 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
             test $status -eq 124; and test "$verbose" = true; and echo "  timeout: $__gencomp_help_cmd (killed after 3s)" >&2
         else
             eval $__gencomp_help_cmd 2>&1
-        end | tr \t ' ' | string replace -ra '\e\[[0-9;]*m' '' | while read -l line
+        end | string replace -a \t '  ' | string replace -ra '\e\[[0-9;]*m' '' | while read -l line
+
+            set -l indent (string match -r -- '^ *' "$line" | string length)
 
             # parse subcommand
-            if test "$section" != command; and string match -iqr "^([\w ]* )?commands?( [\w ]*)?" -- "$line"
+            # a header sits at the left margin and is not a sentence: wrapped
+            # prose mentioning "commands" is indented to the description column
+            if string match -iqr '^ {0,3}(\w[\w-]*(?: [\w-]+)* )?(sub)?commands?\b(?: [^ ,.][^,.]*)?:?\s*$' -- "$line"
                 set section command
                 continue
             end
 
             if test "$section" = command
+                # another section's header ("Global Options:", "FLAGS") ends it
+                if string match -qr '^(?:[A-Za-z][^:]*:|[A-Z][A-Z ]*)\s*$' -- "$line"
+                    set section default
+                    continue
+                end
 
-                # e.g.)
-                # COMMANDS
-                #     command, c   do something
-                set -l words (string match -r -- '^ +(\w[\w-]*)(?:, *)\w(?:[,= ] *)(.*)' "$line")
-                if test (count $words) = 3
-                    __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]" "$sub"
-                    if test "$depth" -gt 0
-                        # --only filter applies at the top level only
-                        if test -z "$only_pattern"; or test -n "$sub"; or string match -rq -- "$only_pattern" "$words[2]"
-                            set -l new_sub (string trim -- "$sub $words[2]")
-                            set -l child_depth (math "$depth - 1")
-                            test "$verbose" = true; and echo "  subcommand: $cmd $new_sub" >&2
-                            set -l sub_completions (__gencomp_parse "$cmd" "$new_sub" "$use_command" "$child_depth" "$verbose" "")
-                            if not count $sub_completions >/dev/null; and test "$use_command" != '{} --help'
-                                set sub_completions (__gencomp_parse "$cmd" "$new_sub" '{} --help' "$child_depth" "$verbose" "")
-                            end
-                            test "$verbose" = true; and echo "    options: "(count $sub_completions) >&2
-                            printf '%s\n' $sub_completions
-                        end
-                    end
+                # wrapped descriptions and example blocks sit deeper than the
+                # subcommand names themselves
+                if test -n "$cmd_indent"; and test $indent -gt $cmd_indent
                     continue
                 end
 
                 # e.g.)
                 # COMMANDS
+                #     command, c        do something
+                #     command|alias     do something
                 #     command    do something
-                set -l words (string match -r -- '^ +(\w[\w-]*)(?:[,= ] *)(.*)' "$line")
-                if test (count $words) = 3
-                    __gencomp_subcommand_completion "$cmd" "$words[2]" "$words[3]" "$sub"
+                set -l words (string match -r -- '^( +)(\w[\w-]*)((?:\|[\w-]+)*)(?:, *\w)?[,= ] *(.*)' "$line")
+                if test (count $words) = 5
+                    set -q cmd_indent[1]; or set cmd_indent $indent
+                    for name in $words[3] (string split -n '|' -- "$words[4]")
+                        __gencomp_subcommand_completion "$cmd" "$name" "$words[5]" "$sub"
+                    end
                     if test "$depth" -gt 0
                         # --only filter applies at the top level only
-                        if test -z "$only_pattern"; or test -n "$sub"; or string match -rq -- "$only_pattern" "$words[2]"
-                            set -l new_sub (string trim -- "$sub $words[2]")
+                        if test -z "$only_pattern"; or test -n "$sub"; or string match -rq -- "$only_pattern" "$words[3]"
+                            set -l new_sub (string trim -- "$sub $words[3]")
                             set -l child_depth (math "$depth - 1")
                             test "$verbose" = true; and echo "  subcommand: $cmd $new_sub" >&2
                             set -l sub_completions (__gencomp_parse "$cmd" "$new_sub" "$use_command" "$child_depth" "$verbose" "")
@@ -245,41 +253,74 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
             # parse options
 
-            # e.g.) -h, --help  show help
-            set -l words (string match -r -- "^ *-(\w)(?:, | )--(\w[\w-]+)(?:=\S+|\[=\S+\])? +(.*)" "$line")
-            if test (count $words) = 4
-                __gencomp_option_completion "$cmd" "$sub" "$words[2]" "$words[3]" "" "$words[4]"
+            # a line indented to the description column is a wrapped
+            # description, even when it happens to start with --flag
+            if test -n "$desc_col"; and test $indent -ge $desc_col
                 continue
             end
-
-            # e.g.) --help, -h  show help
-            set -l words (string match -r -- "^ *--(\w[\w-]+)(?:=\S+|\[=\S+\])?(?:, | )-(\w) +(.*)" "$line")
-            if test (count $words) = 4
-                __gencomp_option_completion "$cmd" "$sub" "$words[3]" "$words[2]" "" "$words[4]"
-                continue
+            set -l gap (string match -r -- '^( *-\S.*?\S {2,})\S' "$line")
+            if test (count $gap) = 2
+                set -l col (string length -- "$gap[2]")
+                set -a desc_cols $col
+                # ponytail: widest column seen wins, so one short early option
+                # can't make later GNU-style '      --long' lines look wrapped
+                test -z "$desc_col"; or test $col -gt $desc_col
+                and set desc_col $col
             end
 
-            # e.g.) --help  show help
-            set -l words (string match -r -- "^ *--(\w[\w-]+)(?:=\S+|\[=\S+\])? +(.*)" "$line")
-            if test (count $words) = 3
-                __gencomp_option_completion "$cmd" "$sub" "" "$words[2]" "" "$words[3]"
+            # e.g.) -h, --help                show help
+            #       -a --all                  space-separated names (systemctl)
+            #       -o FILE, --output=FILE    write to FILE
+            #       -c, --context string      cobra-style typed flag
+            #       -L [<KIND>=]<PATH>        adjacent placeholders (rustc)
+            #       -c cmd : program passed in as string   (python)
+            #       -u, --user <user:pass> Server user      (curl)
+            #           --ignore-command-error ignore exit codes   (GNU tar)
+            #       --bg, --background
+            #       -port int                 (Go's flag package)
+            # any argument words are allowed when a clear description gap
+            # follows; otherwise only <arg>, [arg] and UPPERCASE ones, so wrapped
+            # prose that starts with a flag is rejected. A description on the
+            # next line is never guessed.
+            set -l placeholder '(?:(?:<[^>]*>|\[[^\]]*\]|[A-Z][A-Z0-9_-]*)+(?:\.\.\.)?|\.\.\.)'
+            set -l strict_arg "(?:[ =]$placeholder|\[=\S*\])"
+            set -l arg "(?:$strict_arg|[ =][\w{'\"][^\s,]*|=\S+)"
+            set -l flags "-{1,2}\w[\w-]*(?:(?:$strict_arg|[ =][a-z][\w-]*)*(?:, *| )-{1,2}\w[\w-]*)*"
+
+            # flags, then a 2+ space, " : " or post-<arg> gap before the description
+            set -l words (string match -r -- "^ *($flags)$arg*(?: {2,}(?:: )?| : |(?<=[>\]]) (?!-))(\S.*)\$" "$line")
+            if test (count $words) != 3
+                # one space is only trusted when the description starts on a
+                # column other options' descriptions already use
+                set words (string match -r -- "^ *($flags)$strict_arg* (\S.*)\$" "$line")
+                if test (count $words) = 3
+                    and not contains -- (math (string length -- "$line") - (string length -- "$words[3]")) $desc_cols
+                    set words
+                end
+            end
+            if test (count $words) != 3
+                # flags alone; the description, if any, is on the next line
+                set words (string match -r -- "^ *($flags)$strict_arg*(?:[ =][a-z][\w|.-]*:?)?\$" "$line")
+            end
+            if test (count $words) = 3; and string match -qr -- '^-{1,2}\w[\w-]*(?:=\S*)?$' "$words[3]"
+                set words $words[1] "$words[2] $words[3]"
+            end
+            if test (count $words) -ge 2
+                set -l short
+                set -l long
+                set -l old
+                for flag in (string split -n ' ' -- "$words[2]" | string split -n ',' | string match -r -- '^-{1,2}\w[\w-]*')
+                    if string match -q -- '--*' $flag
+                        set -a long (string sub -s 3 -- $flag)
+                    else if test (string length -- $flag) -eq 2
+                        set -a short (string sub -s 2 -- $flag)
+                    else
+                        set -a old (string sub -s 2 -- $flag)
+                    end
+                end
+                __gencomp_option_completion "$cmd" "$sub" "$short" "$long" "$old" "$words[3]"
                 continue
             end
-
-            # e.g.) -h  show help
-            set -l words (string match -r -- "^ *-(\w)(?:=\S+)? +(.*)" "$line")
-            if test (count $words) = 3
-                __gencomp_option_completion "$cmd" "$sub" "$words[2]" "" "" "$words[3]"
-                continue
-            end
-
-            # e.g.) -help  show help
-            set -l words (string match -r -- "^ *-(\w[\w-]+)(?:=\S+|\[=\S+\])? +(.*)" "$line")
-            if test (count $words) = 3
-                __gencomp_option_completion "$cmd" "$sub" "" "" "$words[2]" "$words[3]"
-                continue
-            end
-
         end
     end
 
