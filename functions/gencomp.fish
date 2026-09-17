@@ -171,8 +171,11 @@ function gencomp -d 'generate completions for fish-shell with usage messages'
 
         # For external commands, wrap with `timeout` to prevent
         # subprocesses that never exit from hanging gencomp.
+        # timeout runs the command in its own background process group, so
+        # anything that touches a terminal stdin gets SIGTTIN and stops until
+        # killed; /dev/null keeps it off the terminal.
         if command -q timeout; and not functions -q $cmd
-            command timeout -k 2 3 sh -c "$__gencomp_help_cmd 2>&1"
+            command timeout -k 2 3 sh -c "$__gencomp_help_cmd 2>&1" </dev/null
             test $status -eq 124; and test "$verbose" = true; and echo "  timeout: $__gencomp_help_cmd (killed after 3s)" >&2
         else
             eval $__gencomp_help_cmd 2>&1
